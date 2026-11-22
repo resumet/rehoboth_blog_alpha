@@ -1,0 +1,54 @@
+name: Publish blog
+on:
+  push:
+    branches: [blue-ladder-pages]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: blog-pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Restore original blog files
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, io, json, pathlib, zipfile
+          manifest = json.loads(pathlib.Path('blog-bundle.json').read_text())
+          if manifest.get('version') != 1 or not 1 <= manifest['parts'] <= 1200:
+              raise ValueError('Unsupported blog bundle')
+          data = b''.join(base64.b64decode(pathlib.Path(f'.blog-upload/part-{n:04d}.b64').read_text(), validate=True) for n in range(manifest['parts']))
+          if len(data) != manifest['bytes'] or len(data) > 40*1024*1024 or hashlib.sha256(data).hexdigest() != manifest['sha256']:
+              raise ValueError('Blog bundle integrity check failed')
+          output = pathlib.Path('public').resolve()
+          output.mkdir(exist_ok=True)
+          total = 0
+          with zipfile.ZipFile(io.BytesIO(data)) as archive:
+              if len(archive.infolist()) > 150:
+                  raise ValueError('Too many blog files')
+              for item in archive.infolist():
+                  target = (output / item.filename).resolve()
+                  total += item.file_size
+                  if not target.is_relative_to(output) or total > 40*1024*1024 or ((item.external_attr >> 16) & 0o170000) == 0o120000:
+                      raise ValueError('Invalid blog file')
+              archive.extractall(output)
+          if not (output / 'index.html').is_file():
+              raise ValueError('Missing blog home page')
+          PY
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+      - uses: actions/deploy-pages@v4
+        id: deploy
