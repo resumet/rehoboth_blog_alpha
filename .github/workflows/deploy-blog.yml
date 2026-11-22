@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 concurrency:
@@ -51,6 +52,25 @@ jobs:
         with:
           path: public
           name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Wait for Pages artifact metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts"
+          for attempt in range(12):
+              request = urllib.request.Request(url, headers={'Authorization': 'Bearer '+os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  artifacts = json.load(response)['artifacts']
+              if any(item['name'] == os.environ['ARTIFACT_NAME'] and not item.get('expired', False) for item in artifacts):
+                  print('Pages artifact metadata is ready')
+                  break
+              time.sleep(5)
+          else:
+              raise RuntimeError('Pages artifact metadata was not available in time')
+          PY
       - uses: actions/deploy-pages@v4
         id: deploy
         with:
