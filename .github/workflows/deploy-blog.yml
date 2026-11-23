@@ -36,7 +36,7 @@ jobs:
           output.mkdir(exist_ok=True)
           total = 0
           with zipfile.ZipFile(io.BytesIO(data)) as archive:
-              if len(archive.infolist()) > 150:
+              if len(archive.infolist()) > 1000:
                   raise ValueError('Too many blog files')
               for item in archive.infolist():
                   target = (output / item.filename).resolve()
